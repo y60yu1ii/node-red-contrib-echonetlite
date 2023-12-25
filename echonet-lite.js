@@ -1,15 +1,23 @@
+var EchonetLite = require("node-echonet-lite");
 module.exports = function (RED) {
   // echonet-lite node
   function EchonetLiteNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
     node.location = config.location;
+    node.el = new EchonetLite({ type: "lan" });
     node.on("input", function (msg) {
       let location = node.location ? node.location : msg.payload.location;
       if (!location) {
         node.error("missing location", msg);
       } else {
-        toggleDevice();
+        node.el.init((err) => {
+          if (err) {
+            showErrorExit(err);
+          } else {
+            discoverDevices(node);
+          }
+        });
         msg.payload = {
           text: `msg has ${location} original payload is ${msg.payload}`,
         };
@@ -20,28 +28,10 @@ module.exports = function (RED) {
   // to register the echonet-lite function as a node
   RED.nodes.registerType("echonet-lite", EchonetLiteNode, {});
 
-  var EchonetLite = require("node-echonet-lite");
-  var el = new EchonetLite({ type: "lan" });
-  // Initialize the EchonetLite object
-  el.init((err) => {
-    if (err) {
-      // An error was occurred
-      showErrorExit(err);
-    } else {
-      // // Start to discover devices
-      // discoverDevices();
-    }
-  });
-
-  function toggleDevice() {
-    if (el) {
-      discoverDevices();
-    }
-  }
   // Start to discover devices
-  function discoverDevices() {
+  function discoverDevices(node) {
     // Start to discover Echonet Lite devices
-    el.startDiscovery((err, res) => {
+    node.el.startDiscovery((err, res) => {
       // Error handling
       if (err) {
         showErrorExit(err);
@@ -52,15 +42,20 @@ module.exports = function (RED) {
       var eoj = device["eoj"][0];
       var group_code = eoj[0]; // Class group code
       var class_code = eoj[1]; // Class code
+      console.log(
+        `Group: 0x${group_code.toString(16)} Class: 0x${class_code.toString(
+          16
+        )} at ${address}`
+      );
       console.log(`Found ${JSON.stringify(device)} at ${address}`);
-      if (group_code === 0x01 && class_code === 0x30) {
+      if (group_code === 0x02 && class_code === 0x7c) {
         // Stop to discovery process
-        el.stopDiscovery();
+        node.el.stopDiscovery();
         // This means that the found device belongs to the home air conditioner class
         // Get the operation status
-        getOperationStatus(address, eoj);
+        getOperationStatus(address, eoj, node);
 
-        el.getPropertyValue(address, eoj, 0xbb, (err, res) => {
+        node.el.getPropertyValue(address, eoj, 0xbb, (err, res) => {
           console.log("- Property value:");
           console.dir(res["message"]["data"]);
         });
@@ -69,28 +64,28 @@ module.exports = function (RED) {
   }
 
   // Get the operation status
-  function getOperationStatus(address, eoj) {
+  function getOperationStatus(address, eoj, node) {
     var epc = 0x80; // An property code which means the operation status
-    el.getPropertyValue(address, eoj, epc, (err, res) => {
+    node.el.getPropertyValue(address, eoj, epc, (err, res) => {
       // this value is true if the air conditione is on
       var status = res["message"]["data"]["status"];
       var desc = status ? "on" : "off";
-      console.log("The air conditioner is " + desc + ".");
+      console.log("The fuel cell is " + desc + ".");
       // Toggle the status of the operation status
-      changePowerStatus(address, eoj, epc, !status);
+      changePowerStatus(address, eoj, epc, !status, node);
     });
   }
 
   // Change the status of the operation status
-  function changePowerStatus(address, eoj, epc, status) {
+  function changePowerStatus(address, eoj, epc, status, node) {
     var edt = { status: status };
-    el.setPropertyValue(address, eoj, epc, edt, (err, res) => {
+    node.el.setPropertyValue(address, eoj, epc, edt, (err, res) => {
       var desc = status ? "on" : "off";
       console.log("The air conditionaer was turned " + desc + ".");
-      el.close(() => {
-        console.log("Closed.");
-        // This script terminates here.
-      });
+      // node.el.close(() => {
+      //   console.log("Closed.");
+      //   // This script terminates here.
+      // });
     });
   }
 
